@@ -81,7 +81,8 @@ export const metaInfoAttributeKeys = [
 
 // HTML elements which dont have a head tag (shortened to our needs)
 // see: https://www.w3.org/TR/html52/document-metadata.html
-export const tagsWithoutEndTag = ['base', 'meta', 'link']
+// remove meta (奇葩的seo vendor 说 meta 没有闭合标签会有问题？)
+export const tagsWithoutEndTag = ['base', 'link']
 
 // HTML elements which can have inner content (shortened to our needs)
 export const tagsWithInnerContent = ['noscript', 'script', 'style']
