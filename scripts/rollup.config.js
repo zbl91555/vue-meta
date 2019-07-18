@@ -51,7 +51,8 @@ function rollupConfig({
       json(),
       nodeResolve(),
       commonjs(),
-      replace(replaceConfig)
+      replace(replaceConfig),
+      buble({ transforms: { dangerousForOf: true } })
     ].concat(plugins),
   })
 }
