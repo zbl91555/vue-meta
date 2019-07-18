@@ -1,5 +1,5 @@
 /**
- * vue-meta v2.0.5
+ * vue-meta v2.1.0
  * (c) 2019
  * - Declan de Wet
  * - Sébastien Chopin (@Atinux)
@@ -9,10 +9,10 @@
 
 import deepmerge from 'deepmerge';
 
-var version = "2.0.5";
+var version = "2.1.0";
 
 // store an id to keep track of DOM updates
-let batchId = null;
+var batchId = null;
 
 function triggerUpdate (vm, hookName) {
   // if an update was triggered during initialization or when an update was triggered by the
@@ -24,7 +24,7 @@ function triggerUpdate (vm, hookName) {
 
   if (vm.$root._vueMeta.initialized && !vm.$root._vueMeta.paused) {
     // batch potential DOM updates to prevent extraneous re-rendering
-    batchUpdate(() => vm.$meta().refresh());
+    batchUpdate(function () { return vm.$meta().refresh(); });
   }
 }
 
@@ -35,10 +35,12 @@ function triggerUpdate (vm, hookName) {
  * @param  {Function} callback - the update to perform
  * @return {Number} id - a new ID
  */
-function batchUpdate (callback, timeout = 10) {
+function batchUpdate (callback, timeout) {
+  if ( timeout === void 0 ) timeout = 10;
+
   clearTimeout(batchId);
 
-  batchId = setTimeout(() => {
+  batchId = setTimeout(function () {
     callback();
   }, timeout);
 
@@ -60,6 +62,10 @@ function isUndefined (arg) {
 
 function isObject (arg) {
   return typeof arg === 'object'
+}
+
+function isPureObject (arg) {
+  return typeof arg === 'object' && arg !== null
 }
 
 function isFunction (arg) {
@@ -88,12 +94,16 @@ function ensuredPush (object, key, el) {
 }
 
 // Vue $root instance has a _vueMeta object property, otherwise its a boolean true
-function hasMetaInfo (vm = this) {
+function hasMetaInfo (vm) {
+  if ( vm === void 0 ) vm = this;
+
   return vm && (vm._vueMeta === true || isObject(vm._vueMeta))
 }
 
 // a component is in a metaInfo branch when itself has meta info or one of its (grand-)children has
-function inMetaInfoBranch (vm = this) {
+function inMetaInfoBranch (vm) {
+  if ( vm === void 0 ) vm = this;
+
   return vm && !isUndefined(vm._vueMeta)
 }
 
@@ -106,34 +116,37 @@ function addNavGuards (vm) {
 
   vm.$root._vueMeta.navGuards = true;
 
-  const $router = vm.$root.$router;
-  const $meta = vm.$root.$meta();
+  var $router = vm.$root.$router;
+  var $meta = vm.$root.$meta();
 
-  $router.beforeEach((to, from, next) => {
+  $router.beforeEach(function (to, from, next) {
     $meta.pause();
     next();
   });
 
-  $router.afterEach(() => {
-    const { metaInfo } = $meta.resume();
+  $router.afterEach(function () {
+    var ref = $meta.resume();
+    var metaInfo = ref.metaInfo;
     if (metaInfo && metaInfo.afterNavigation && isFunction(metaInfo.afterNavigation)) {
       metaInfo.afterNavigation(metaInfo);
     }
   });
 }
 
-let appId = 1;
+var appId = 1;
 
 function createMixin (Vue, options) {
   // for which Vue lifecycle hooks should the metaInfo be refreshed
-  const updateOnLifecycleHook = ['activated', 'deactivated', 'beforeMount'];
+  var updateOnLifecycleHook = ['activated', 'deactivated', 'beforeMount'];
 
   // watch for client side component updates
   return {
-    beforeCreate () {
+    beforeCreate: function beforeCreate () {
+      var this$1 = this;
+
       Object.defineProperty(this, '_hasMetaInfo', {
         configurable: true,
-        get () {
+        get: function get () {
           // Show deprecation warning once when devtools enabled
           if (Vue.config.devtools && !this.$root._vueMeta.hasMetaInfoDeprecationWarningShown) {
             console.warn('VueMeta DeprecationWarning: _hasMetaInfo has been deprecated and will be removed in a future version. Please use hasMetaInfo(vm) instead'); // eslint-disable-line no-console
@@ -148,7 +161,7 @@ function createMixin (Vue, options) {
       // useful if we use some mixin to add some meta tags (like nuxt-i18n)
       if (!isUndefined(this.$options[options.keyName]) && this.$options[options.keyName] !== null) {
         if (!this.$root._vueMeta) {
-          this.$root._vueMeta = { appId };
+          this.$root._vueMeta = { appId: appId };
           appId++;
         }
 
@@ -157,7 +170,7 @@ function createMixin (Vue, options) {
         if (!this._vueMeta) {
           this._vueMeta = true;
 
-          let p = this.$parent;
+          var p = this.$parent;
           while (p && p !== this.$root) {
             if (isUndefined(p._vueMeta)) {
               p._vueMeta = false;
@@ -178,8 +191,8 @@ function createMixin (Vue, options) {
             // if computed $metaInfo exists, watch it for updates & trigger a refresh
             // when it changes (i.e. automatically handle async actions that affect metaInfo)
             // credit for this suggestion goes to [Sébastien Chopin](https://github.com/Atinux)
-            ensuredPush(this.$options, 'created', () => {
-              this.$watch('$metaInfo', function () {
+            ensuredPush(this.$options, 'created', function () {
+              this$1.$watch('$metaInfo', function () {
                 triggerUpdate(this, 'watcher');
               });
             });
@@ -194,24 +207,28 @@ function createMixin (Vue, options) {
           this.$root._vueMeta.initialized = this.$isServer;
 
           if (!this.$root._vueMeta.initialized) {
-            ensuredPush(this.$options, 'beforeMount', () => {
+            ensuredPush(this.$options, 'beforeMount', function () {
               // if this Vue-app was server rendered, set the appId to 'ssr'
               // only one SSR app per page is supported
-              if (this.$root.$el && this.$root.$el.hasAttribute && this.$root.$el.hasAttribute('data-server-rendered')) {
-                this.$root._vueMeta.appId = 'ssr';
+              if (this$1.$root.$el && this$1.$root.$el.hasAttribute && this$1.$root.$el.hasAttribute('data-server-rendered')) {
+                this$1.$root._vueMeta.appId = options.ssrAppId;
               }
             });
 
             // we use the mounted hook here as on page load
-            ensuredPush(this.$options, 'mounted', () => {
-              if (!this.$root._vueMeta.initialized) {
+            ensuredPush(this.$options, 'mounted', function () {
+              if (!this$1.$root._vueMeta.initialized) {
                 // used in triggerUpdate to check if a change was triggered
                 // during initialization
-                this.$root._vueMeta.initializing = true;
+                this$1.$root._vueMeta.initializing = true;
 
                 // refresh meta in nextTick so all child components have loaded
-                this.$nextTick(function () {
-                  const { tags, metaInfo } = this.$root.$meta().refresh();
+                this$1.$nextTick(function () {
+                  var this$1 = this;
+
+                  var ref = this.$root.$meta().refresh();
+                  var tags = ref.tags;
+                  var metaInfo = ref.metaInfo;
 
                   // After ssr hydration (identifier by tags === false) check
                   // if initialized was set to null in triggerUpdate. That'd mean
@@ -220,7 +237,7 @@ function createMixin (Vue, options) {
                   // current hook was called
                   // (during initialization all changes are blocked)
                   if (tags === false && this.$root._vueMeta.initialized === null) {
-                    this.$nextTick(() => triggerUpdate(this, 'initializing'));
+                    this.$nextTick(function () { return triggerUpdate(this$1, 'initializing'); });
                   }
 
                   this.$root._vueMeta.initialized = true;
@@ -245,27 +262,27 @@ function createMixin (Vue, options) {
         // do not trigger refresh on the server side
         if (!this.$isServer) {
           // no need to add this hooks on server side
-          updateOnLifecycleHook.forEach((lifecycleHook) => {
-            ensuredPush(this.$options, lifecycleHook, () => triggerUpdate(this, lifecycleHook));
+          updateOnLifecycleHook.forEach(function (lifecycleHook) {
+            ensuredPush(this$1.$options, lifecycleHook, function () { return triggerUpdate(this$1, lifecycleHook); });
           });
 
           // re-render meta data when returning from a child component to parent
-          ensuredPush(this.$options, 'destroyed', () => {
+          ensuredPush(this.$options, 'destroyed', function () {
             // Wait that element is hidden before refreshing meta tags (to support animations)
-            const interval = setInterval(() => {
-              if (this.$el && this.$el.offsetParent !== null) {
+            var interval = setInterval(function () {
+              if (this$1.$el && this$1.$el.offsetParent !== null) {
                 /* istanbul ignore next line */
                 return
               }
 
               clearInterval(interval);
 
-              if (!this.$parent) {
+              if (!this$1.$parent) {
                 /* istanbul ignore next line */
                 return
               }
 
-              triggerUpdate(this, 'destroyed');
+              triggerUpdate(this$1, 'destroyed');
             }, 50);
           });
         }
@@ -279,7 +296,7 @@ function createMixin (Vue, options) {
  */
 
 // set some sane defaults
-const defaultInfo = {
+var defaultInfo = {
   title: undefined,
   titleChunk: '',
   titleTemplate: '%s',
@@ -298,39 +315,43 @@ const defaultInfo = {
 
 // This is the name of the component option that contains all the information that
 // gets converted to the various meta tags & attributes for the page.
-const keyName = 'metaInfo';
+var keyName = 'metaInfo';
 
 // This is the attribute vue-meta arguments on elements to know which it should
 // manage and which it should ignore.
-const attribute = 'data-vue-meta';
+var attribute = 'data-vue-meta';
 
 // This is the attribute that goes on the `html` tag to inform `vue-meta`
 // that the server has already generated the meta tags for the initial render.
-const ssrAttribute = 'data-vue-meta-server-rendered';
+var ssrAttribute = 'data-vue-meta-server-rendered';
 
 // This is the property that tells vue-meta to overwrite (instead of append)
 // an item in a tag list. For example, if you have two `meta` tag list items
 // that both have `vmid` of "description", then vue-meta will overwrite the
 // shallowest one with the deepest one.
-const tagIDKeyName = 'vmid';
+var tagIDKeyName = 'vmid';
 
 // This is the key name for possible meta templates
-const metaTemplateKeyName = 'template';
+var metaTemplateKeyName = 'template';
 
 // This is the key name for the content-holding property
-const contentKeyName = 'content';
+var contentKeyName = 'content';
 
-const defaultOptions = {
-  keyName,
-  attribute,
-  ssrAttribute,
-  tagIDKeyName,
-  contentKeyName,
-  metaTemplateKeyName
+// The id used for the ssr app
+var ssrAppId = 'ssr';
+
+var defaultOptions = {
+  keyName: keyName,
+  attribute: attribute,
+  ssrAttribute: ssrAttribute,
+  tagIDKeyName: tagIDKeyName,
+  contentKeyName: contentKeyName,
+  metaTemplateKeyName: metaTemplateKeyName,
+  ssrAppId: ssrAppId
 };
 
 // List of metaInfo property keys which are configuration options (and dont generate html)
-const metaInfoOptionKeys = [
+var metaInfoOptionKeys = [
   'titleChunk',
   'titleTemplate',
   'changed',
@@ -339,20 +360,23 @@ const metaInfoOptionKeys = [
 ];
 
 // The metaInfo property keys which are used to disable escaping
-const disableOptionKeys = [
+var disableOptionKeys = [
   '__dangerouslyDisableSanitizers',
   '__dangerouslyDisableSanitizersByTagID'
 ];
 
 // List of metaInfo property keys which only generates attributes and no tags
-const metaInfoAttributeKeys = [
+var metaInfoAttributeKeys = [
   'htmlAttrs',
   'headAttrs',
   'bodyAttrs'
 ];
 
+// Attributes which should be added with data- prefix
+var commonDataAttributes = ['body', 'pbody'];
+
 // from: https://github.com/kangax/html-minifier/blob/gh-pages/src/htmlminifier.js#L202
-const booleanHtmlAttributes = [
+var booleanHtmlAttributes = [
   'allowfullscreen',
   'amp',
   'async',
@@ -398,13 +422,13 @@ const booleanHtmlAttributes = [
 ];
 
 // eslint-disable-next-line no-console
-const showWarningNotSupported = () => console.warn('This vue app/component has no vue-meta configuration');
+var showWarningNotSupported = function () { return console.warn('This vue app/component has no vue-meta configuration'); };
 
 function setOptions (options) {
   // combine options
   options = isObject(options) ? options : {};
 
-  for (const key in defaultOptions) {
+  for (var key in defaultOptions) {
     if (!options[key]) {
       options[key] = defaultOptions[key];
     }
@@ -414,20 +438,24 @@ function setOptions (options) {
 }
 
 function getOptions (options) {
-  const optionsCopy = {};
-  for (const key in options) {
+  var optionsCopy = {};
+  for (var key in options) {
     optionsCopy[key] = options[key];
   }
   return optionsCopy
 }
 
-function pause (refresh = true) {
+function pause (refresh) {
+  if ( refresh === void 0 ) refresh = true;
+
   this.$root._vueMeta.paused = true;
 
-  return () => resume(refresh)
+  return function () { return resume(refresh); }
 }
 
-function resume (refresh = true) {
+function resume (refresh) {
+  if ( refresh === void 0 ) refresh = true;
+
   this.$root._vueMeta.paused = false;
 
   if (refresh) {
@@ -435,7 +463,11 @@ function resume (refresh = true) {
   }
 }
 
-function applyTemplate ({ component, metaTemplateKeyName, contentKeyName }, headObject, template, chunk) {
+function applyTemplate (ref, headObject, template, chunk) {
+  var component = ref.component;
+  var metaTemplateKeyName = ref.metaTemplateKeyName;
+  var contentKeyName = ref.contentKeyName;
+
   if (isUndefined(template)) {
     template = headObject[metaTemplateKeyName];
     delete headObject[metaTemplateKeyName];
@@ -478,7 +510,7 @@ function includes (array, value) {
   return array.includes(value)
 }
 
-const clientSequences = [
+var clientSequences = [
   [/&/g, '\u0026'],
   [/</g, '\u003C'],
   [/>/g, '\u003E'],
@@ -488,12 +520,12 @@ const clientSequences = [
 
 // sanitizes potentially dangerous characters
 function escape (info, options, escapeOptions) {
-  const { tagIDKeyName } = options;
-  const { doEscape = v => v } = escapeOptions;
-  const escaped = {};
+  var tagIDKeyName = options.tagIDKeyName;
+  var doEscape = escapeOptions.doEscape; if ( doEscape === void 0 ) doEscape = function (v) { return v; };
+  var escaped = {};
 
-  for (const key in info) {
-    const value = info[key];
+  for (var key in info) {
+    var value = info[key];
 
     // no need to escape configuration options
     if (includes(metaInfoOptionKeys, key)) {
@@ -501,14 +533,14 @@ function escape (info, options, escapeOptions) {
       continue
     }
 
-    let [ disableKey ] = disableOptionKeys;
+    var disableKey = disableOptionKeys[0];
     if (escapeOptions[disableKey] && includes(escapeOptions[disableKey], key)) {
       // this info[key] doesnt need to escaped if the option is listed in __dangerouslyDisableSanitizers
       escaped[key] = value;
       continue
     }
 
-    const tagId = info[tagIDKeyName];
+    var tagId = info[tagIDKeyName];
     if (tagId) {
       disableKey = disableOptionKeys[1];
 
@@ -522,12 +554,12 @@ function escape (info, options, escapeOptions) {
     if (isString(value)) {
       escaped[key] = doEscape(value);
     } else if (isArray(value)) {
-      escaped[key] = value.map((v) => {
-        return isObject(v)
+      escaped[key] = value.map(function (v) {
+        return isPureObject(v)
           ? escape(v, options, escapeOptions)
           : doEscape(v)
       });
-    } else if (isObject(value)) {
+    } else if (isPureObject(value)) {
       escaped[key] = escape(value, options, escapeOptions);
     } else {
       escaped[key] = value;
@@ -537,21 +569,26 @@ function escape (info, options, escapeOptions) {
   return escaped
 }
 
-function arrayMerge ({ component, tagIDKeyName, metaTemplateKeyName, contentKeyName }, target, source) {
+function arrayMerge (ref, target, source) {
+  var component = ref.component;
+  var tagIDKeyName = ref.tagIDKeyName;
+  var metaTemplateKeyName = ref.metaTemplateKeyName;
+  var contentKeyName = ref.contentKeyName;
+
   // we concat the arrays without merging objects contained in,
   // but we check for a `vmid` property on each object in the array
   // using an O(1) lookup associative array exploit
-  const destination = [];
+  var destination = [];
 
-  target.forEach((targetItem, targetIndex) => {
+  target.forEach(function (targetItem, targetIndex) {
     // no tagID so no need to check for duplicity
     if (!targetItem[tagIDKeyName]) {
       destination.push(targetItem);
       return
     }
 
-    const sourceIndex = findIndex(source, item => item[tagIDKeyName] === targetItem[tagIDKeyName]);
-    const sourceItem = source[sourceIndex];
+    var sourceIndex = findIndex(source, function (item) { return item[tagIDKeyName] === targetItem[tagIDKeyName]; });
+    var sourceItem = source[sourceIndex];
 
     // source doesnt contain any duplicate vmid's, we can keep targetItem
     if (sourceIndex === -1) {
@@ -580,26 +617,28 @@ function arrayMerge ({ component, tagIDKeyName, metaTemplateKeyName, contentKeyN
     }
 
     // now we only need to check if the target has a template to combine it with the source
-    const targetTemplate = targetItem[metaTemplateKeyName];
+    var targetTemplate = targetItem[metaTemplateKeyName];
     if (!targetTemplate) {
       return
     }
 
-    const sourceTemplate = sourceItem[metaTemplateKeyName];
+    var sourceTemplate = sourceItem[metaTemplateKeyName];
 
     if (!sourceTemplate) {
       // use parent template and child content
-      applyTemplate({ component, metaTemplateKeyName, contentKeyName }, sourceItem, targetTemplate);
+      applyTemplate({ component: component, metaTemplateKeyName: metaTemplateKeyName, contentKeyName: contentKeyName }, sourceItem, targetTemplate);
     } else if (!sourceItem[contentKeyName]) {
       // use child template and parent content
-      applyTemplate({ component, metaTemplateKeyName, contentKeyName }, sourceItem, undefined, targetItem[contentKeyName]);
+      applyTemplate({ component: component, metaTemplateKeyName: metaTemplateKeyName, contentKeyName: contentKeyName }, sourceItem, undefined, targetItem[contentKeyName]);
     }
   });
 
   return destination.concat(source)
 }
 
-function merge (target, source, options = {}) {
+function merge (target, source, options) {
+  if ( options === void 0 ) options = {};
+
   // remove properties explicitly set to false so child components can
   // optionally _not_ overwrite the parents content
   // (for array properties this is checked in arrayMerge)
@@ -607,12 +646,12 @@ function merge (target, source, options = {}) {
     delete source.title;
   }
 
-  metaInfoAttributeKeys.forEach((attrKey) => {
+  metaInfoAttributeKeys.forEach(function (attrKey) {
     if (!source[attrKey]) {
       return
     }
 
-    for (const key in source[attrKey]) {
+    for (var key in source[attrKey]) {
       if (source[attrKey].hasOwnProperty(key) && source[attrKey][key] === undefined) {
         if (booleanHtmlAttributes.includes(key)) {
           // eslint-disable-next-line no-console
@@ -624,7 +663,7 @@ function merge (target, source, options = {}) {
   });
 
   return deepmerge(target, source, {
-    arrayMerge: (t, s) => arrayMerge(options, t, s)
+    arrayMerge: function (t, s) { return arrayMerge(options, t, s); }
   })
 }
 
@@ -642,9 +681,15 @@ function merge (target, source, options = {}) {
  * @param  {Object} [result={}] - result so far
  * @return {Object} result - final aggregated result
  */
-function getComponentOption (options = {}, component, result = {}) {
-  const { keyName, metaTemplateKeyName, tagIDKeyName } = options;
-  const { $options, $children } = component;
+function getComponentOption (options, component, result) {
+  if ( options === void 0 ) options = {};
+  if ( result === void 0 ) result = {};
+
+  var keyName = options.keyName;
+  var metaTemplateKeyName = options.metaTemplateKeyName;
+  var tagIDKeyName = options.tagIDKeyName;
+  var $options = component.$options;
+  var $children = component.$children;
 
   if (component._inactive) {
     return result
@@ -652,7 +697,7 @@ function getComponentOption (options = {}, component, result = {}) {
 
   // only collect option data if it exists
   if ($options[keyName]) {
-    let data = $options[keyName];
+    var data = $options[keyName];
 
     // if option is a function, replace it with it's result
     if (isFunction(data)) {
@@ -670,7 +715,7 @@ function getComponentOption (options = {}, component, result = {}) {
 
   // collect & aggregate child options if deep = true
   if ($children.length) {
-    $children.forEach((childComponent) => {
+    $children.forEach(function (childComponent) {
       // check if the childComponent is in a branch
       // return otherwise so we dont walk all component branches unnecessarily
       if (!inMetaInfoBranch(childComponent)) {
@@ -683,15 +728,15 @@ function getComponentOption (options = {}, component, result = {}) {
 
   if (metaTemplateKeyName && result.meta) {
     // apply templates if needed
-    result.meta.forEach(metaObject => applyTemplate(options, metaObject));
+    result.meta.forEach(function (metaObject) { return applyTemplate(options, metaObject); });
 
     // remove meta items with duplicate vmid's
-    result.meta = result.meta.filter((metaItem, index, arr) => {
+    result.meta = result.meta.filter(function (metaItem, index, arr) {
       return (
         // keep meta item if it doesnt has a vmid
         !metaItem.hasOwnProperty(tagIDKeyName) ||
         // or if it's the first item in the array with this vmid
-        index === findIndex(arr, item => item[tagIDKeyName] === metaItem[tagIDKeyName])
+        index === findIndex(arr, function (item) { return item[tagIDKeyName] === metaItem[tagIDKeyName]; })
       )
     });
   }
@@ -706,9 +751,12 @@ function getComponentOption (options = {}, component, result = {}) {
  * @param  {Object} component - the Vue instance to get meta info from
  * @return {Object} - returned meta info
  */
-function getMetaInfo (options = {}, component, escapeSequences = []) {
+function getMetaInfo (options, component, escapeSequences) {
+  if ( options === void 0 ) options = {};
+  if ( escapeSequences === void 0 ) escapeSequences = [];
+
   // collect & aggregate all metaInfo $options
-  let info = getComponentOption(options, component, defaultInfo);
+  var info = getComponentOption(options, component, defaultInfo);
 
   // Remove all "template" tags from meta
 
@@ -719,7 +767,7 @@ function getMetaInfo (options = {}, component, escapeSequences = []) {
 
   // replace title with populated template
   if (info.titleTemplate && info.titleTemplate !== '%s') {
-    applyTemplate({ component, contentKeyName: 'title' }, info, info.titleTemplate, info.titleChunk || '');
+    applyTemplate({ component: component, contentKeyName: 'title' }, info, info.titleTemplate, info.titleChunk || '');
   }
 
   // convert base tag to an array so it can be handled the same way
@@ -728,15 +776,20 @@ function getMetaInfo (options = {}, component, escapeSequences = []) {
     info.base = Object.keys(info.base).length ? [info.base] : [];
   }
 
-  const escapeOptions = {
-    doEscape: value => escapeSequences.reduce((val, [v, r]) => val.replace(v, r), value)
+  var escapeOptions = {
+    doEscape: function (value) { return escapeSequences.reduce(function (val, ref) {
+      var v = ref[0];
+      var r = ref[1];
+
+      return val.replace(v, r);
+      }, value); }
   };
 
-  disableOptionKeys.forEach((disableKey, index) => {
+  disableOptionKeys.forEach(function (disableKey, index) {
     if (index === 0) {
       ensureIsArray(info, disableKey);
     } else if (index === 1) {
-      for (const key in info[disableKey]) {
+      for (var key in info[disableKey]) {
         ensureIsArray(info[disableKey], key);
       }
     }
@@ -750,21 +803,63 @@ function getMetaInfo (options = {}, component, escapeSequences = []) {
   return info
 }
 
+function getTag (tags, tag) {
+  if (!tags[tag]) {
+    tags[tag] = document.getElementsByTagName(tag)[0];
+  }
+
+  return tags[tag]
+}
+
+function getElementsKey (ref) {
+  var body = ref.body;
+  var pbody = ref.pbody;
+
+  return body
+    ? 'body'
+    : (pbody ? 'pbody' : 'head')
+}
+
+function queryElements (parentNode, ref, attributes) {
+  var appId = ref.appId;
+  var attribute = ref.attribute;
+  var type = ref.type;
+  var tagIDKeyName = ref.tagIDKeyName;
+  if ( attributes === void 0 ) attributes = {};
+
+  var queries = [
+    (type + "[" + attribute + "=\"" + appId + "\"]"),
+    (type + "[data-" + tagIDKeyName + "]")
+  ].map(function (query) {
+    for (var key in attributes) {
+      var val = attributes[key];
+      var attributeValue = val && val !== true ? ("=\"" + val + "\"") : '';
+      query += "[data-" + key + attributeValue + "]";
+    }
+    return query
+  });
+
+  return toArray(parentNode.querySelectorAll(queries.join(', ')))
+}
+
 /**
  * Updates the document's html tag attributes
  *
  * @param  {Object} attrs - the new document html attributes
  * @param  {HTMLElement} tag - the HTMLElement tag to update with new attrs
  */
-function updateAttribute ({ attribute } = {}, attrs, tag) {
-  const vueMetaAttrString = tag.getAttribute(attribute);
-  const vueMetaAttrs = vueMetaAttrString ? vueMetaAttrString.split(',') : [];
-  const toRemove = toArray(vueMetaAttrs);
+function updateAttribute (ref, attrs, tag) {
+  if ( ref === void 0 ) ref = {};
+  var attribute = ref.attribute;
 
-  const keepIndexes = [];
-  for (const attr in attrs) {
+  var vueMetaAttrString = tag.getAttribute(attribute);
+  var vueMetaAttrs = vueMetaAttrString ? vueMetaAttrString.split(',') : [];
+  var toRemove = toArray(vueMetaAttrs);
+
+  var keepIndexes = [];
+  for (var attr in attrs) {
     if (attrs.hasOwnProperty(attr)) {
-      const value = includes(booleanHtmlAttributes, attr)
+      var value = includes(booleanHtmlAttributes, attr)
         ? ''
         : isArray(attrs[attr]) ? attrs[attr].join(' ') : attrs[attr];
 
@@ -779,9 +874,9 @@ function updateAttribute ({ attribute } = {}, attrs, tag) {
     }
   }
 
-  const removedAttributesCount = toRemove
-    .filter((el, index) => !includes(keepIndexes, index))
-    .reduce((acc, attr) => {
+  var removedAttributesCount = toRemove
+    .filter(function (el, index) { return !includes(keepIndexes, index); })
+    .reduce(function (acc, attr) {
       tag.removeAttribute(attr);
       return acc + 1
     }, 0);
@@ -799,7 +894,7 @@ function updateAttribute ({ attribute } = {}, attrs, tag) {
  * @param  {String} title - the new title of the document
  */
 function updateTitle (title) {
-  if (title === undefined) {
+  if (!title && title !== '') {
     return
   }
 
@@ -814,94 +909,127 @@ function updateTitle (title) {
  * @param  {(Array<Object>|Object)} tags - an array of tag objects or a single object in case of base
  * @return {Object} - a representation of what tags changed
  */
-function updateTag (appId, { attribute, tagIDKeyName } = {}, type, tags, headTag, bodyTag) {
-  const oldHeadTags = toArray(headTag.querySelectorAll(`${type}[${attribute}="${appId}"], ${type}[data-${tagIDKeyName}]`));
-  const oldBodyTags = toArray(bodyTag.querySelectorAll(`${type}[${attribute}="${appId}"][data-body="true"], ${type}[data-${tagIDKeyName}][data-body="true"]`));
-  const dataAttributes = [tagIDKeyName, 'body'];
-  const newTags = [];
+function updateTag (appId, ref, type, tags, head, body) {
+  if ( ref === void 0 ) ref = {};
+  var attribute = ref.attribute;
+  var tagIDKeyName = ref.tagIDKeyName;
+
+  var dataAttributes = [tagIDKeyName ].concat( commonDataAttributes);
+  var newElements = [];
+
+  var queryOptions = { appId: appId, attribute: attribute, type: type, tagIDKeyName: tagIDKeyName };
+  var currentElements = {
+    head: queryElements(head, queryOptions),
+    pbody: queryElements(body, queryOptions, { pbody: true }),
+    body: queryElements(body, queryOptions, { body: true })
+  };
 
   if (tags.length > 1) {
     // remove duplicates that could have been found by merging tags
     // which include a mixin with metaInfo and that mixin is used
     // by multiple components on the same page
-    const found = [];
-    tags = tags.filter((x) => {
-      const k = JSON.stringify(x);
-      const res = !includes(found, k);
+    var found = [];
+    tags = tags.filter(function (x) {
+      var k = JSON.stringify(x);
+      var res = !includes(found, k);
       found.push(k);
       return res
     });
   }
 
   if (tags.length) {
-    tags.forEach((tag) => {
-      const newElement = document.createElement(type);
+    var loop = function () {
+      var tag = list[i];
 
+      var newElement = document.createElement(type);
       newElement.setAttribute(attribute, appId);
 
-      const oldTags = tag.body !== true ? oldHeadTags : oldBodyTags;
-
-      for (const attr in tag) {
+      for (var attr in tag) {
         if (tag.hasOwnProperty(attr)) {
           if (attr === 'innerHTML') {
             newElement.innerHTML = tag.innerHTML;
-          } else if (attr === 'cssText') {
+            continue
+          }
+
+          if (attr === 'cssText') {
             if (newElement.styleSheet) {
               /* istanbul ignore next */
               newElement.styleSheet.cssText = tag.cssText;
             } else {
               newElement.appendChild(document.createTextNode(tag.cssText));
             }
-          } else {
-            const _attr = includes(dataAttributes, attr)
-              ? `data-${attr}`
-              : attr;
-
-            const isBooleanAttribute = includes(booleanHtmlAttributes, attr);
-            if (isBooleanAttribute && !tag[attr]) {
-              continue
-            }
-
-            const value = isBooleanAttribute ? '' : tag[attr];
-            newElement.setAttribute(_attr, value);
+            continue
           }
+
+          var _attr = includes(dataAttributes, attr)
+            ? ("data-" + attr)
+            : attr;
+
+          var isBooleanAttribute = includes(booleanHtmlAttributes, attr);
+          if (isBooleanAttribute && !tag[attr]) {
+            continue
+          }
+
+          var value = isBooleanAttribute ? '' : tag[attr];
+          newElement.setAttribute(_attr, value);
         }
       }
 
+      var oldElements$1 = currentElements[getElementsKey(tag)];
+
       // Remove a duplicate tag from domTagstoRemove, so it isn't cleared.
-      let indexToDelete;
-      const hasEqualElement = oldTags.some((existingTag, index) => {
+      var indexToDelete = (void 0);
+      var hasEqualElement = oldElements$1.some(function (existingTag, index) {
         indexToDelete = index;
         return newElement.isEqualNode(existingTag)
       });
 
       if (hasEqualElement && (indexToDelete || indexToDelete === 0)) {
-        oldTags.splice(indexToDelete, 1);
+        oldElements$1.splice(indexToDelete, 1);
       } else {
-        newTags.push(newElement);
+        newElements.push(newElement);
       }
-    });
+    };
+
+    for (var i = 0, list = tags; i < list.length; i += 1) loop();
   }
 
-  const oldTags = oldHeadTags.concat(oldBodyTags);
-  oldTags.forEach(tag => tag.parentNode.removeChild(tag));
-  newTags.forEach((tag) => {
-    if (tag.getAttribute('data-body') === 'true') {
-      bodyTag.appendChild(tag);
-    } else {
-      headTag.appendChild(tag);
+  var oldElements = [];
+  for (var i$1 = 0, list$1 = Object.values(currentElements); i$1 < list$1.length; i$1 += 1) {
+    var current = list$1[i$1];
+
+    oldElements = oldElements.concat( current
+    );
+  }
+
+  // remove old elements
+  for (var i$2 = 0, list$2 = oldElements; i$2 < list$2.length; i$2 += 1) {
+    var element = list$2[i$2];
+
+    element.parentNode.removeChild(element);
+  }
+
+  // insert new elements
+  for (var i$3 = 0, list$3 = newElements; i$3 < list$3.length; i$3 += 1) {
+    var element$1 = list$3[i$3];
+
+    if (element$1.hasAttribute('data-body')) {
+      body.appendChild(element$1);
+      continue
     }
-  });
 
-  return { oldTags, newTags }
-}
+    if (element$1.hasAttribute('data-pbody')) {
+      body.insertBefore(element$1, body.firstChild);
+      continue
+    }
 
-function getTag (tags, tag) {
-  if (!tags[tag]) {
-    tags[tag] = document.getElementsByTagName(tag)[0];
+    head.appendChild(element$1);
   }
 
-  return tags[tag]
+  return {
+    oldTags: oldElements,
+    newTags: newElements
+  }
 }
 
 /**
@@ -909,26 +1037,29 @@ function getTag (tags, tag) {
  *
  * @param  {Object} newInfo - the meta info to update to
  */
-function updateClientMetaInfo (appId, options = {}, newInfo) {
-  const { ssrAttribute } = options;
+function updateClientMetaInfo (appId, options, newInfo) {
+  if ( options === void 0 ) options = {};
+
+  var ssrAttribute = options.ssrAttribute;
+  var ssrAppId = options.ssrAppId;
 
   // only cache tags for current update
-  const tags = {};
+  var tags = {};
 
-  const htmlTag = getTag(tags, 'html');
+  var htmlTag = getTag(tags, 'html');
 
   // if this is a server render, then dont update
-  if (appId === 'ssr' && htmlTag.hasAttribute(ssrAttribute)) {
+  if (appId === ssrAppId && htmlTag.hasAttribute(ssrAttribute)) {
     // remove the server render attribute so we can update on (next) changes
     htmlTag.removeAttribute(ssrAttribute);
     return false
   }
 
   // initialize tracked changes
-  const addedTags = {};
-  const removedTags = {};
+  var addedTags = {};
+  var removedTags = {};
 
-  for (const type in newInfo) {
+  for (var type in newInfo) {
     // ignore these
     if (includes(metaInfoOptionKeys, type)) {
       continue
@@ -941,7 +1072,7 @@ function updateClientMetaInfo (appId, options = {}, newInfo) {
     }
 
     if (includes(metaInfoAttributeKeys, type)) {
-      const tagName = type.substr(0, 4);
+      var tagName = type.substr(0, 4);
       updateAttribute(options, newInfo[type], getTag(tags, tagName));
       continue
     }
@@ -951,7 +1082,7 @@ function updateClientMetaInfo (appId, options = {}, newInfo) {
       continue
     }
 
-    const { oldTags, newTags } = updateTag(
+    var ref = updateTag(
       appId,
       options,
       type,
@@ -959,6 +1090,8 @@ function updateClientMetaInfo (appId, options = {}, newInfo) {
       getTag(tags, 'head'),
       getTag(tags, 'body')
     );
+    var oldTags = ref.oldTags;
+    var newTags = ref.newTags;
 
     if (newTags.length) {
       addedTags[type] = newTags;
@@ -966,10 +1099,12 @@ function updateClientMetaInfo (appId, options = {}, newInfo) {
     }
   }
 
-  return { addedTags, removedTags }
+  return { addedTags: addedTags, removedTags: removedTags }
 }
 
-function _refresh (options = {}) {
+function _refresh (options) {
+  if ( options === void 0 ) options = {};
+
   /**
    * When called, will update the current meta info with new meta info.
    * Useful when updating meta info as the result of an asynchronous
@@ -981,22 +1116,24 @@ function _refresh (options = {}) {
    * @return {Object} - new meta info
    */
   return function refresh () {
-    const metaInfo = getMetaInfo(options, this.$root, clientSequences);
+    var metaInfo = getMetaInfo(options, this.$root, clientSequences);
 
-    const appId = this.$root._vueMeta.appId;
-    const tags = updateClientMetaInfo(appId, options, metaInfo);
+    var appId = this.$root._vueMeta.appId;
+    var tags = updateClientMetaInfo(appId, options, metaInfo);
     // emit "event" with new info
     if (tags && isFunction(metaInfo.changed)) {
       metaInfo.changed(metaInfo, tags.addedTags, tags.removedTags);
     }
 
-    return { vm: this, metaInfo, tags }
+    return { vm: this, metaInfo: metaInfo, tags: tags }
   }
 }
 
-function _$meta (options = {}) {
-  const _refresh$1 = _refresh(options);
-  const inject = () => {};
+function _$meta (options) {
+  if ( options === void 0 ) options = {};
+
+  var _refresh$1 = _refresh(options);
+  var inject = function () {};
 
   /**
    * Returns an injector for server-side rendering.
@@ -1015,9 +1152,9 @@ function _$meta (options = {}) {
     }
 
     return {
-      getOptions: () => getOptions(options),
+      getOptions: function () { return getOptions(options); },
       refresh: _refresh$1.bind(this),
-      inject,
+      inject: inject,
       pause: pause.bind(this),
       resume: resume.bind(this)
     }
@@ -1028,7 +1165,9 @@ function _$meta (options = {}) {
  * Plugin install function.
  * @param {Function} Vue - the Vue constructor.
  */
-function install (Vue, options = {}) {
+function install (Vue, options) {
+  if ( options === void 0 ) options = {};
+
   if (Vue.__vuemeta_installed) {
     return
   }
@@ -1048,9 +1187,9 @@ if (!isUndefined(window) && !isUndefined(window.Vue)) {
 }
 
 var browser = {
-  version,
-  install,
-  hasMetaInfo
+  version: version,
+  install: install,
+  hasMetaInfo: hasMetaInfo
 };
 
 export default browser;
